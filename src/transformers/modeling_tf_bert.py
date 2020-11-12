@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import tensorflow as tf
-import herring.tensorflow as herring
+import smdistributed.dataparallel.tensorflow as herring
 
 from .activations_tf import get_tf_activation
 from .configuration_bert import BertConfig
