@@ -20,6 +20,8 @@ Fine-tuning the library models for question answering.
 
 import logging
 import os
+os.environ['TRAINING_JOB_NAME']='abc'
+os.environ['TRAINING_JOB_ARN']='abc'
 import sys
 from dataclasses import dataclass, field
 from typing import Optional
