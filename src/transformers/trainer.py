@@ -135,7 +135,7 @@ if is_fairscale_available():
 
 if is_sagemaker_distributed_available():
     import herring.torch.distributed as dist
-    from smdistributed.dataparallel.torch.parallel.distributed import DistributedDataParallel as DDP
+    from herring.torch.parallel import DistributedDataParallel as DDP
 else:
     import torch.distributed as dist
 
