@@ -196,7 +196,7 @@ def total_processes_number(local_rank):
 
         return xm.xrt_world_size()
     elif is_sagemaker_distributed_available():
-        import herring.torch.distributed as dist
+        import herring.torch as dist
 
         return dist.get_world_size()
     elif local_rank != -1 and is_torch_available():

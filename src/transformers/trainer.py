@@ -134,7 +134,7 @@ if is_fairscale_available():
     from fairscale.optim.grad_scaler import ShardedGradScaler
 
 if is_sagemaker_distributed_available():
-    import herring.torch.distributed as dist
+    import herring.torch as dist
     from herring.torch.parallel import DistributedDataParallel as DDP
 else:
     import torch.distributed as dist

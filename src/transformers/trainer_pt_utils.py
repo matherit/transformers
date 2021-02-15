@@ -33,7 +33,7 @@ from .utils import logging
 
 
 if is_sagemaker_distributed_available():
-    import herring.torch.distributed as dist
+    import herring.torch as dist
 else:
     import torch.distributed as dist
 
