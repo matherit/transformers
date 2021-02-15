@@ -543,7 +543,7 @@ class TrainingArguments:
             device = xm.xla_device()
             self._n_gpu = 0
         elif is_sagemaker_distributed_available():
-            import smdistributed.dataparallel.torch.distributed as dist
+            import herring.torch.distributed as dist
 
             dist.init_process_group()
             self.local_rank = dist.get_local_rank()
