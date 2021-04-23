@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import tensorflow as tf
+import smdistributed.dataparallel.tensorflow as smddp
 
 from ...activations_tf import get_tf_activation
 from ...file_utils import (
@@ -451,6 +452,7 @@ class TFBertEncoder(tf.keras.layers.Layer):
             layer_outputs = layer_module(
                 hidden_states, attention_mask, head_mask[i], output_attentions, training=training
             )
+            layer_outputs = smddp.overlap(layer_outputs)
             hidden_states = layer_outputs[0]
 
             if output_attentions:
