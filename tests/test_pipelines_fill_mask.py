@@ -1,6 +1,18 @@
-import unittest
+# Copyright 2020 The HuggingFace Team. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-import pytest
+import unittest
 
 from transformers import pipeline
 from transformers.testing_utils import require_tf, require_torch, slow
@@ -52,13 +64,6 @@ class FillMaskPipelineTests(MonoInputPipelineCommonMixin, unittest.TestCase):
         "This is"  # No mask_token is not supported
     ]
     expected_check_keys = ["sequence"]
-
-    @require_torch
-    def test_torch_topk_deprecation(self):
-        # At pipeline initialization only it was not enabled at pipeline
-        # call site before
-        with pytest.warns(FutureWarning, match=r".*use `top_k`.*"):
-            pipeline(task="fill-mask", model=self.small_models[0], topk=1)
 
     @require_torch
     def test_torch_fill_mask(self):
@@ -178,7 +183,7 @@ class FillMaskPipelineTests(MonoInputPipelineCommonMixin, unittest.TestCase):
         ]
         valid_targets = [" Patrick", " Clara"]
         for model_name in self.large_models:
-            nlp = pipeline(task="fill-mask", model=model_name, tokenizer=model_name, framework="tf", topk=2)
+            nlp = pipeline(task="fill-mask", model=model_name, tokenizer=model_name, framework="tf", top_k=2)
 
             mono_result = nlp(valid_inputs[0], targets=valid_targets)
             self.assertIsInstance(mono_result, list)

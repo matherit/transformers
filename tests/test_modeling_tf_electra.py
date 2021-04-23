@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The Google AI Language Team Authors.
+# Copyright 2020 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ from .test_modeling_tf_common import TFModelTesterMixin, ids_tensor
 if is_tf_available():
     import tensorflow as tf
 
-    from transformers.modeling_tf_electra import (
+    from transformers.models.electra.modeling_tf_electra import (
         TFElectraForMaskedLM,
         TFElectraForMultipleChoice,
         TFElectraForPreTraining,
@@ -97,7 +97,6 @@ class TFElectraModelTester:
             max_position_embeddings=self.max_position_embeddings,
             type_vocab_size=self.type_vocab_size,
             initializer_range=self.initializer_range,
-            return_dict=True,
         )
 
         return config, input_ids, token_type_ids, input_mask, sequence_labels, token_labels, choice_labels
@@ -250,6 +249,7 @@ class TFElectraModelTest(TFModelTesterMixin, unittest.TestCase):
             self.assertIsNotNone(model)
 
 
+@require_tf
 class TFElectraModelIntegrationTest(unittest.TestCase):
     @slow
     def test_inference_masked_lm(self):

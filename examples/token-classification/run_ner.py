@@ -15,7 +15,8 @@
 """
 Fine-tuning the library models for token classification.
 """
-# You can also adapt this script on your own token classification task and datasets. Pointers for this are left as comments.
+# You can also adapt this script on your own token classification task and datasets. Pointers for this are left as
+# comments.
 
 import logging
 import os
@@ -24,7 +25,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
-from datasets import load_dataset
+from datasets import ClassLabel, load_dataset
 from seqeval.metrics import accuracy_score, f1_score, precision_score, recall_score
 
 import transformers
@@ -34,6 +35,7 @@ from transformers import (
     AutoTokenizer,
     DataCollatorForTokenClassification,
     HfArgumentParser,
+    PreTrainedTokenizerFast,
     Trainer,
     TrainingArguments,
     set_seed,
@@ -60,7 +62,19 @@ class ModelArguments:
         default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
     )
     cache_dir: Optional[str] = field(
-        default=None, metadata={"help": "Where do you want to store the pretrained models downloaded from s3"}
+        default=None,
+        metadata={"help": "Where do you want to store the pretrained models downloaded from huggingface.co"},
+    )
+    model_revision: str = field(
+        default="main",
+        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
+    )
+    use_auth_token: bool = field(
+        default=False,
+        metadata={
+            "help": "Will use the token generated when running `transformers-cli login` (necessary to use this script "
+            "with private models)."
+        },
     )
 
 
@@ -163,6 +177,8 @@ def main():
     # Set the verbosity to info of the Transformers logger (on main process only):
     if is_main_process(training_args.local_rank):
         transformers.utils.logging.set_verbosity_info()
+        transformers.utils.logging.enable_default_handler()
+        transformers.utils.logging.enable_explicit_format()
     logger.info("Training/evaluation parameters %s", training_args)
 
     # Set seed before initializing model.
@@ -195,12 +211,17 @@ def main():
 
     if training_args.do_train:
         column_names = datasets["train"].column_names
+        features = datasets["train"].features
     else:
         column_names = datasets["validation"].column_names
-    text_column_name = "words" if "words" in column_names else column_names[0]
-    label_column_name = data_args.task_name if data_args.task_name in column_names else column_names[1]
+        features = datasets["validation"].features
+    text_column_name = "tokens" if "tokens" in column_names else column_names[0]
+    label_column_name = (
+        f"{data_args.task_name}_tags" if f"{data_args.task_name}_tags" in column_names else column_names[1]
+    )
 
-    # Labeling (this part will be easier when https://github.com/huggingface/datasets/issues/797 is solved)
+    # In the event the labels are not a `Sequence[ClassLabel]`, we will need to go through the dataset to get the
+    # unique labels.
     def get_label_list(labels):
         unique_labels = set()
         for label in labels:
@@ -209,8 +230,13 @@ def main():
         label_list.sort()
         return label_list
 
-    label_list = get_label_list(datasets["train"][label_column_name])
-    label_to_id = {l: i for i, l in enumerate(label_list)}
+    if isinstance(features[label_column_name].feature, ClassLabel):
+        label_list = features[label_column_name].feature.names
+        # No need to convert the labels since they are already ints.
+        label_to_id = {i: i for i in range(len(label_list))}
+    else:
+        label_list = get_label_list(datasets["train"][label_column_name])
+        label_to_id = {l: i for i, l in enumerate(label_list)}
     num_labels = len(label_list)
 
     # Load pretrained model and tokenizer
@@ -223,18 +249,32 @@ def main():
         num_labels=num_labels,
         finetuning_task=data_args.task_name,
         cache_dir=model_args.cache_dir,
+        revision=model_args.model_revision,
+        use_auth_token=True if model_args.use_auth_token else None,
     )
     tokenizer = AutoTokenizer.from_pretrained(
         model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
         use_fast=True,
+        revision=model_args.model_revision,
+        use_auth_token=True if model_args.use_auth_token else None,
     )
     model = AutoModelForTokenClassification.from_pretrained(
         model_args.model_name_or_path,
         from_tf=bool(".ckpt" in model_args.model_name_or_path),
         config=config,
         cache_dir=model_args.cache_dir,
+        revision=model_args.model_revision,
+        use_auth_token=True if model_args.use_auth_token else None,
     )
+
+    # Tokenizer check: this script requires a fast tokenizer.
+    if not isinstance(tokenizer, PreTrainedTokenizerFast):
+        raise ValueError(
+            "This example script only works for models that have a fast tokenizer. Checkout the big table of models "
+            "at https://huggingface.co/transformers/index.html#bigtable to find the model types that meet this "
+            "requirement"
+        )
 
     # Preprocessing the dataset
     # Padding strategy
@@ -248,28 +288,25 @@ def main():
             truncation=True,
             # We use this argument because the texts in our dataset are lists of words (with a label for each word).
             is_split_into_words=True,
-            return_offsets_mapping=True,
         )
-        offset_mappings = tokenized_inputs.pop("offset_mapping")
         labels = []
-        for label, offset_mapping in zip(examples[label_column_name], offset_mappings):
-            label_index = 0
-            current_label = -100
+        for i, label in enumerate(examples[label_column_name]):
+            word_ids = tokenized_inputs.word_ids(batch_index=i)
+            previous_word_idx = None
             label_ids = []
-            for offset in offset_mapping:
-                # We set the label for the first token of each word. Special characters will have an offset of (0, 0)
-                # so the test ignores them.
-                if offset[0] == 0 and offset[1] != 0:
-                    current_label = label_to_id[label[label_index]]
-                    label_index += 1
-                    label_ids.append(current_label)
-                # For special tokens, we set the label to -100 so it's automatically ignored in the loss function.
-                elif offset[0] == 0 and offset[1] == 0:
+            for word_idx in word_ids:
+                # Special tokens have a word id that is None. We set the label to -100 so they are automatically
+                # ignored in the loss function.
+                if word_idx is None:
                     label_ids.append(-100)
+                # We set the label for the first token of each word.
+                elif word_idx != previous_word_idx:
+                    label_ids.append(label_to_id[label[word_idx]])
                 # For the other tokens in a word, we set the label to either the current label or -100, depending on
                 # the label_all_tokens flag.
                 else:
-                    label_ids.append(current_label if data_args.label_all_tokens else -100)
+                    label_ids.append(label_to_id[label[word_idx]] if data_args.label_all_tokens else -100)
+                previous_word_idx = word_idx
 
             labels.append(label_ids)
         tokenized_inputs["labels"] = labels
@@ -320,10 +357,21 @@ def main():
 
     # Training
     if training_args.do_train:
-        trainer.train(
+        train_result = trainer.train(
             model_path=model_args.model_name_or_path if os.path.isdir(model_args.model_name_or_path) else None
         )
         trainer.save_model()  # Saves the tokenizer too for easy upload
+
+        output_train_file = os.path.join(training_args.output_dir, "train_results.txt")
+        if trainer.is_world_process_zero():
+            with open(output_train_file, "w") as writer:
+                logger.info("***** Train results *****")
+                for key, value in sorted(train_result.metrics.items()):
+                    logger.info(f"  {key} = {value}")
+                    writer.write(f"{key} = {value}\n")
+
+            # Need to save the state, since Trainer.save_model saves only the tokenizer with the model
+            trainer.state.save_to_json(os.path.join(training_args.output_dir, "trainer_state.json"))
 
     # Evaluation
     results = {}
@@ -344,7 +392,7 @@ def main():
     if training_args.do_predict:
         logger.info("*** Predict ***")
 
-        test_dataset = datasets["test"]
+        test_dataset = tokenized_datasets["test"]
         predictions, labels, metrics = trainer.predict(test_dataset)
         predictions = np.argmax(predictions, axis=2)
 
@@ -355,15 +403,15 @@ def main():
         ]
 
         output_test_results_file = os.path.join(training_args.output_dir, "test_results.txt")
-        if trainer.is_world_master():
+        if trainer.is_world_process_zero():
             with open(output_test_results_file, "w") as writer:
-                for key, value in metrics.items():
+                for key, value in sorted(metrics.items()):
                     logger.info(f"  {key} = {value}")
                     writer.write(f"{key} = {value}\n")
 
         # Save predictions
         output_test_predictions_file = os.path.join(training_args.output_dir, "test_predictions.txt")
-        if trainer.is_world_master():
+        if trainer.is_world_process_zero():
             with open(output_test_predictions_file, "w") as writer:
                 for prediction in true_predictions:
                     writer.write(" ".join(prediction) + "\n")
